@@ -137,7 +137,7 @@ gcpc()   { git cherry-pick --continue "$@" }; compdef _git gcpc=git-cherry-pick
 glc()    { git clone "$@"; }; compdef _git glc=git-clone
 gd()     { git diff "$@"; }; compdef _git gd=git-diff
 gdc()    { git diff --cached "$@"; }; compdef _git gdc=git-diff
-gdd()    { gfo && git diff "origin/$(get_default_branch)" "$@"; }; compdef _git gdd=git-diff
+gdd()    { git diff "$(get_default_branch)" "$@"; }; compdef _git gdd=git-diff
 # Delete all local branches that don't have changes not already in default branch
 gemp() {
   gfo
