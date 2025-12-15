@@ -43,6 +43,18 @@ safe_delete_branch() {
   git branch -D "$branch"
 }
 
+# Get the main worktree directory (first worktree in list)
+get_main_worktree() {
+  git worktree list --porcelain | awk '/^worktree / { print $2; exit }'
+}
+
+# Check if we're in a secondary worktree (not main)
+in_secondary_worktree() {
+  local current=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  local main=$(get_main_worktree)
+  [[ -n "$current" ]] && [[ -n "$main" ]] && [[ "$current" != "$main" ]]
+}
+
 # Perform an operation that might fail if the current branch is implicated in a way that won't fail
 # Leaves you on default branch after if your current branch ceased to exist.
 # Works with multi-worktree setup by using detached HEAD at origin/default
@@ -277,6 +289,13 @@ gstu()  { git stash -u "$@"; }; compdef _git gstu=git-stash
 gsw() {
   local branch=$1
 
+  # If we're in a Conductor worktree, cd to main first
+  if in_secondary_worktree; then
+    local main_worktree=$(get_main_worktree)
+    echo "→ ${main_worktree:t}"
+    cd "$main_worktree"
+  fi
+
   # If no arguments or starts with -, pass through to git switch
   if [[ -z "$branch" ]] || [[ "$branch" == -* ]]; then
     git switch "$@"
@@ -306,8 +325,24 @@ gsw() {
     git switch "$@"
   fi
 }; compdef _git gsw=git-switch
-gswc()  { git switch -c "$@"; }; compdef _git gswc=git-switch
-gswcd() { gfo && git switch -c "$1" "origin/$(get_default_branch)"; }; compdef _git gswcd=git-switch
+gswc()  {
+  # If we're in a Conductor worktree, cd to main first
+  if in_secondary_worktree; then
+    local main_worktree=$(get_main_worktree)
+    echo "→ ${main_worktree:t}"
+    cd "$main_worktree"
+  fi
+  git switch -c "$@"
+}; compdef _git gswc=git-switch
+gswcd() {
+  # If we're in a Conductor worktree, cd to main first
+  if in_secondary_worktree; then
+    local main_worktree=$(get_main_worktree)
+    echo "→ ${main_worktree:t}"
+    cd "$main_worktree"
+  fi
+  gfo && git switch -c "$1" "origin/$(get_default_branch)"
+}; compdef _git gswcd=git-switch
 gswd()  { gsw $(get_default_branch); }; compdef _git gswd=git-switch
 gswp()  { git switch - "$@"; }; compdef _git gswp=git-switch
 gtc()   { gt create "$@"; }
