@@ -78,6 +78,29 @@ with_default_branch() {
   fi
 }
 
+# Execute a command from the main worktree, returning to original location on failure
+# On success, stays in the main worktree (or wherever the command leaves you)
+from_main_worktree() {
+  local original_dir="$PWD"
+  local moved=false
+
+  if in_secondary_worktree; then
+    local main_worktree=$(get_main_worktree)
+    echo "→ ${main_worktree:t}"
+    cd "$main_worktree"
+    moved=true
+  fi
+
+  if ! "$@"; then
+    # Command failed, return to original directory if we moved
+    [[ "$moved" == true ]] && cd "$original_dir"
+    return 1
+  fi
+
+  # Success: stay where we are
+  return 0
+}
+
 ## Functions not aliases to allow completions
 ga()    { git add "$@"; }; compdef _git ga=git-add
 gaa()   { git add . "$@"; }; compdef _git gaa=git-add
@@ -110,13 +133,12 @@ gbdc()   {
   local current_branch=$(git rev-parse --abbrev-ref HEAD)
   local default_branch=$(get_default_branch)
 
-  if [[ "$current_branch" != "$default_branch" ]]; then
-    git switch "$default_branch"
-    git branch -D "$current_branch"
-  else
+  if [[ "$current_branch" == "$default_branch" ]]; then
     echo "Cannot delete the default branch"
     return 1
   fi
+
+  from_main_worktree git switch "$default_branch" && git branch -D "$current_branch"
 }; compdef _git gbdc=git-branch
 gbl()    { git blame "$@"; }; compdef _git gbl=git-blame
 gc()     { git commit "$@"; }; compdef _git gc=git-commit
@@ -289,17 +311,20 @@ gstu()  { git stash -u "$@"; }; compdef _git gstu=git-stash
 gsw() {
   local branch=$1
 
-  # If we're in a Conductor worktree, cd to main first
+  # If no arguments or starts with -, pass through to git switch
+  if [[ -z "$branch" ]] || [[ "$branch" == -* ]]; then
+    from_main_worktree git switch "$@"
+    return $?
+  fi
+
+  # Save original location for potential worktree navigation
+  local original_dir="$PWD"
+
+  # Move to main worktree if needed
   if in_secondary_worktree; then
     local main_worktree=$(get_main_worktree)
     echo "→ ${main_worktree:t}"
     cd "$main_worktree"
-  fi
-
-  # If no arguments or starts with -, pass through to git switch
-  if [[ -z "$branch" ]] || [[ "$branch" == -* ]]; then
-    git switch "$@"
-    return $?
   fi
 
   # Check if branch exists locally
@@ -316,32 +341,46 @@ gsw() {
       # Branch is checked out in a different worktree, cd there
       echo "→ ${worktree_path:t}"
       cd "$worktree_path"
+      return 0
     else
       # Branch exists locally and either not checked out or in current worktree
-      git switch "$branch"
+      if ! git switch "$branch"; then
+        # Command failed, return to original directory
+        cd "$original_dir"
+        return 1
+      fi
+      return 0
     fi
   else
     # Branch doesn't exist locally, pass through to git switch
-    git switch "$@"
+    if ! git switch "$@"; then
+      # Command failed, return to original directory
+      cd "$original_dir"
+      return 1
+    fi
+    return 0
   fi
 }; compdef _git gsw=git-switch
 gswc()  {
-  # If we're in a Conductor worktree, cd to main first
-  if in_secondary_worktree; then
-    local main_worktree=$(get_main_worktree)
-    echo "→ ${main_worktree:t}"
-    cd "$main_worktree"
-  fi
-  git switch -c "$@"
+  from_main_worktree git switch -c "$@"
 }; compdef _git gswc=git-switch
 gswcd() {
-  # If we're in a Conductor worktree, cd to main first
+  local branch=$1
+  local default_branch=$(get_default_branch)
+  local original_dir="$PWD"
+  local moved=false
+
   if in_secondary_worktree; then
     local main_worktree=$(get_main_worktree)
     echo "→ ${main_worktree:t}"
     cd "$main_worktree"
+    moved=true
   fi
-  gfo && git switch -c "$1" "origin/$(get_default_branch)"
+
+  if ! gfo || ! git switch -c "$branch" "origin/$default_branch"; then
+    [[ "$moved" == true ]] && cd "$original_dir"
+    return 1
+  fi
 }; compdef _git gswcd=git-switch
 gswd()  { gsw $(get_default_branch); }; compdef _git gswd=git-switch
 gswp()  { git switch - "$@"; }; compdef _git gswp=git-switch
@@ -367,4 +406,3 @@ gwip() {
 
   git add . && git commit -m "WIP" -n
 }
-
